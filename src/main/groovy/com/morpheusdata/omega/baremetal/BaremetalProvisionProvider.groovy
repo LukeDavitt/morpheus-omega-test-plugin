@@ -15,6 +15,8 @@ import com.morpheusdata.core.providers.WorkloadProvisionProvider
 import com.morpheusdata.model.ComputeDevice
 import com.morpheusdata.model.ComputeServer
 import com.morpheusdata.model.ComputeServerInterface
+import com.morpheusdata.model.UpdateDefinition
+import com.morpheusdata.model.UpdateOperation
 import com.morpheusdata.model.ComputeServerInterfaceType
 import com.morpheusdata.model.Icon
 import com.morpheusdata.model.Instance
@@ -56,7 +58,7 @@ import groovy.util.logging.Slf4j
 class BaremetalProvisionProvider extends AbstractProvisionProvider
 		implements WorkloadProvisionProvider, ProvisionInstanceServers, ProvisionProvider.HypervisorConsoleFacet,
 				WorkloadProvisionProvider.ResizeV2Facet, HostProvisionProvider, HostProvisionProvider.ResizeV2Facet, HostProvisionProvider.finalizeHostFacet,  ProvisionProvider.SnapshotFacet,
-				ProvisionProvider.ConvertToManagedFacet,ResourceProvisionProvider {
+				ProvisionProvider.ConvertToManagedFacet, ResourceProvisionProvider, ProvisionProvider.ComputeUpdateFacet {
 	public static final String PROVISION_PROVIDER_CODE = 'omega.baremetal.provision'
 	public static final String ALLETRA_STORAGE_TYPE_CODE = 'hpealletraMPLUN'
 	public static final String CSI_VLAN_CODE = "omega.baremetal.csi.vlan"
@@ -844,6 +846,8 @@ class BaremetalProvisionProvider extends AbstractProvisionProvider
 		}
 		context.async.storageVolume.create(disks, server).blockingGet()
 
+		seedUpdateDefinitions(server)
+
 		return ServiceResponse.success()
 	}
 
@@ -1073,5 +1077,122 @@ class BaremetalProvisionProvider extends AbstractProvisionProvider
 	@Override
 	ServiceResponse destroyInstance(Instance instance, Map opts) {
 		ServiceResponse.success(new ProvisionResponse())
+	}
+
+	// --- ComputeUpdateFacet implementation ---
+
+	/**
+	 * Seeds test UpdateDefinition records for the baremetal server type if they don't already exist.
+	 * Called from finalizeHost so definitions are available immediately after a server is provisioned.
+	 *
+	 * Three definitions are created to cover the main test scenarios:
+	 *   omega.baremetal.update.patch    - normal success path
+	 *   omega.baremetal.update.fail     - code contains 'fail', triggers rollback path in executeUpdate
+	 *   omega.baremetal.update.reboot   - requires reboot flag set
+	 */
+	private void seedUpdateDefinitions(ComputeServer server) {
+		if (!server?.computeServerType?.id) {
+			log.warn("seedUpdateDefinitions: server has no computeServerType, skipping")
+			return
+		}
+		Long typeId = server.computeServerType.id
+
+		def defs = [
+			[
+				code: 'omega.baremetal.update.patch',
+				name: 'Omega Baremetal Patch Update',
+				version: '1.0.1',
+				refType: 'ComputeServerType',
+				refId: typeId,
+				supportsRollback: true,
+				requiresReboot: false,
+				requiresRestart: false,
+				requiresMaintenanceMode: false,
+				isPlugin: true,
+			],
+			[
+				code: 'omega.baremetal.update.fail',
+				name: 'Omega Baremetal Failing Update (rollback test)',
+				version: '1.0.2',
+				refType: 'ComputeServerType',
+				refId: typeId,
+				supportsRollback: true,
+				requiresReboot: false,
+				requiresRestart: false,
+				requiresMaintenanceMode: false,
+				isPlugin: true,
+			],
+			[
+				code: 'omega.baremetal.update.reboot',
+				name: 'Omega Baremetal Reboot-Required Update',
+				version: '1.0.3',
+				refType: 'ComputeServerType',
+				refId: typeId,
+				supportsRollback: false,
+				requiresReboot: true,
+				requiresRestart: false,
+				requiresMaintenanceMode: true,
+				isPlugin: true,
+			],
+		]
+
+		defs.each { d ->
+			def existing = context.services.updateDefinition.find(new DataQuery().withFilter('code', d.code))
+			if (!existing) {
+				log.info("seedUpdateDefinitions: creating UpdateDefinition '${d.code}'")
+				def def_ = new UpdateDefinition(
+					code: d.code,
+					name: d.name,
+					version: d.version,
+					refType: d.refType,
+					refId: d.refId,
+					supportsRollback: d.supportsRollback,
+					requiresReboot: d.requiresReboot,
+					requiresRestart: d.requiresRestart,
+					requiresMaintenanceMode: d.requiresMaintenanceMode,
+					isPlugin: d.isPlugin,
+				)
+				context.services.updateDefinition.create(def_)
+			}
+		}
+	}
+
+	@Override
+	ServiceResponse<UpdateOperation> validateUpdate(UpdateDefinition update, ComputeServer... computeServer) {
+		log.info("validateUpdate called for update: ${update?.name}, servers: ${computeServer?.collect { it.name }}")
+		return ServiceResponse.success(new UpdateOperation())
+	}
+
+	@Override
+	ServiceResponse<UpdateOperation> executeUpdate(UpdateDefinition update, ComputeServer... computeServer) {
+		log.info("executeUpdate called for update: ${update?.name}, servers: ${computeServer?.collect { it.name }}")
+		// If the update code contains 'fail', simulate a failure to test rollback path
+		if(update?.code?.contains('fail')) {
+			log.info("Simulating update failure for testing rollback (update code contains 'fail')")
+			return ServiceResponse.error("Simulated update failure for testing", null, new UpdateOperation())
+		}
+		def op = new UpdateOperation()
+		op.state = UpdateOperation.OpState.COMPLETED
+		op.statusMessage = "Update '${update?.name}' applied successfully (test stub)"
+		op.completedAt = new Date()
+		return ServiceResponse.success(op)
+	}
+
+	@Override
+	ServiceResponse<UpdateOperation> refreshUpdate(UpdateOperation updateOperation, ComputeServer... computeServer) {
+		log.info("refreshUpdate called for operation: ${updateOperation?.id}, servers: ${computeServer?.collect { it.name }}")
+		return ServiceResponse.success(updateOperation)
+	}
+
+	@Override
+	ServiceResponse<UpdateOperation> postUpdate(UpdateDefinition update, ComputeServer... computeServer) {
+		log.info("postUpdate called for update: ${update?.name}, servers: ${computeServer?.collect { it.name }}")
+		return ServiceResponse.success(new UpdateOperation())
+	}
+
+	@Override
+	ServiceResponse<UpdateOperation> rollbackUpdate(UpdateDefinition update, ComputeServer... computeServer) {
+		log.info("rollbackUpdate called for update: ${update?.name}, servers: ${computeServer?.collect { it.name }}")
+		return ServiceResponse.success(new UpdateOperation())
 	}
 }
