@@ -404,7 +404,7 @@ class BaremetalCloudProvider implements CloudProvider {
 	 */
 	@Override
 	Boolean hasNetworks() {
-		return true
+		return false
 	}
 
 	/**

@@ -416,6 +416,9 @@ class BaremetalProvisionProvider extends AbstractProvisionProvider
 		return 'Omega Baremetal'
 	}
 
+	@Override
+	Boolean requiresVirtualImage() { false }
+
 	/**
 	 * {@inheritDoc}
 	 */
@@ -462,13 +465,13 @@ class BaremetalProvisionProvider extends AbstractProvisionProvider
 	 * {@inheritDoc}
 	 */
 	@Override
-	Boolean hasNetworks() { true }
+	Boolean hasNetworks() { false }
 
 	/**
 	 * {@inheritDoc}
 	 */
 	@Override
-	Collection<VirtualImageType> getVirtualImageTypes() { [ new VirtualImageType(code: 'iso', name: 'ISO') ] }
+	Collection<VirtualImageType> getVirtualImageTypes() { [] }
 
 	/**
 	 * {@inheritDoc}
