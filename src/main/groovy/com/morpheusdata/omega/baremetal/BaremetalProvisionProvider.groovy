@@ -1171,9 +1171,17 @@ class BaremetalProvisionProvider extends AbstractProvisionProvider
 			log.info("Simulating update failure for testing rollback (update code contains 'fail')")
 			return ServiceResponse.error("Simulated update failure for testing", null, new UpdateOperation())
 		}
+		
+		// Demo: Rename server to show the update worked
+		computeServer.each { server ->
+			server.name = "${server.name} (patched)"
+			context.services.computeServer.save(server)
+			log.info("Updated server name to: ${server.name}")
+		}
+		
 		def op = new UpdateOperation()
 		op.state = UpdateOperation.OpState.COMPLETED
-		op.statusMessage = "Update '${update?.name}' applied successfully (test stub)"
+		op.statusMessage = "Update '${update?.name}' applied successfully - server patched"
 		op.completedAt = new Date()
 		return ServiceResponse.success(op)
 	}
